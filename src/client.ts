@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import type {
 	CallbackUserFunction,
+	ProcessorConfig,
 	ConfigMessage,
 	DestroyMessage,
 	FunctionMessage,
@@ -11,11 +12,12 @@ import type {
 	Sqlite3Method,
 	TransactionMessage,
 } from './types';
+import { SQLocalProcessor } from './processor';
 
 export class SQLocal {
-	protected databasePath: string;
-	protected worker: Worker;
-	protected isWorkerDestroyed: boolean = false;
+	protected databasePath: string | undefined;
+	protected processor: SQLocalProcessor | Worker;
+	protected isDestroyed: boolean = false;
 	protected userCallbacks = new Map<string, CallbackUserFunction['handler']>();
 	protected queriesInProgress = new Map<
 		QueryKey,
@@ -25,22 +27,36 @@ export class SQLocal {
 		]
 	>();
 
-	constructor(databasePath: string) {
-		this.worker = new Worker(new URL('./worker', import.meta.url), {
-			type: 'module',
-		});
-		this.worker.addEventListener('message', this.processMessageEvent);
+	constructor(databasePath: string);
+	constructor(config: ProcessorConfig);
+	constructor(config: string | ProcessorConfig) {
+		this.databasePath =
+			typeof config === 'string' ? config : config.databasePath;
 
-		this.databasePath = databasePath;
-		this.worker.postMessage({
+		if (
+			typeof config !== 'string' &&
+			config?.storage &&
+			['local', 'session'].includes(config.storage)
+		) {
+			this.processor = new SQLocalProcessor();
+			this.processor.onmessage = (message) => this.processMessageEvent(message);
+		} else {
+			this.processor = new Worker(new URL('./worker', import.meta.url), {
+				type: 'module',
+			});
+			this.processor.addEventListener('message', this.processMessageEvent);
+		}
+
+		this.processor.postMessage({
 			type: 'config',
-			key: 'databasePath',
-			value: databasePath,
+			config: typeof config === 'string' ? { databasePath: config } : config,
 		} satisfies ConfigMessage);
 	}
 
-	protected processMessageEvent = (event: MessageEvent<OutputMessage>) => {
-		const message = event.data;
+	protected processMessageEvent = (
+		event: OutputMessage | MessageEvent<OutputMessage>
+	) => {
+		const message = event instanceof MessageEvent ? event.data : event;
 		const queries = this.queriesInProgress;
 
 		switch (message.type) {
@@ -75,7 +91,7 @@ export class SQLocal {
 			QueryMessage | TransactionMessage | DestroyMessage | FunctionMessage
 		>
 	) => {
-		if (this.isWorkerDestroyed === true) {
+		if (this.isDestroyed === true) {
 			throw new Error(
 				'This SQLocal client has been destroyed. You will need to initialize a new client in order to make further queries.'
 			);
@@ -83,7 +99,7 @@ export class SQLocal {
 
 		const queryKey = nanoid() satisfies QueryKey;
 
-		this.worker.postMessage({
+		this.processor.postMessage({
 			...message,
 			queryKey,
 		} satisfies QueryMessage | TransactionMessage | DestroyMessage | FunctionMessage);
@@ -176,12 +192,24 @@ export class SQLocal {
 	};
 
 	getDatabaseFile = async () => {
+		if (this.databasePath === undefined) {
+			throw new Error(
+				'This database is stored in localStorage or sessionStorage, so there is no file to retrieve.'
+			);
+		}
+
 		const opfs = await navigator.storage.getDirectory();
 		const fileHandle = await opfs.getFileHandle(this.databasePath);
 		return await fileHandle.getFile();
 	};
 
 	overwriteDatabaseFile = async (databaseFile: FileSystemWriteChunkType) => {
+		if (this.databasePath === undefined) {
+			throw new Error(
+				'This database is stored in localStorage or sessionStorage, so it cannot be overwritten with a file.'
+			);
+		}
+
 		const opfs = await navigator.storage.getDirectory();
 		const fileHandle = await opfs.getFileHandle(this.databasePath, {
 			create: true,
@@ -194,10 +222,14 @@ export class SQLocal {
 
 	destroy = async () => {
 		await this.createQuery({ type: 'destroy' });
-		this.worker.removeEventListener('message', this.processMessageEvent);
+
+		if (this.processor instanceof Worker) {
+			this.processor.removeEventListener('message', this.processMessageEvent);
+			this.processor.terminate();
+		}
+
 		this.queriesInProgress.clear();
 		this.userCallbacks.clear();
-		this.worker.terminate();
-		this.isWorkerDestroyed = true;
+		this.isDestroyed = true;
 	};
 }

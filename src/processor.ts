@@ -11,6 +11,7 @@ import type {
 	CallbackUserFunction,
 	OutputMessage,
 	InputMessage,
+	ConfigMessage,
 } from './types';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 
@@ -28,7 +29,18 @@ export class SQLocalProcessor {
 	}
 
 	protected init = async () => {
-		if (!this.config.databasePath) return;
+		const configValid =
+			this.config.databasePath ||
+			['local', 'session'].includes(this.config.storage ?? '');
+		if (!configValid) return;
+
+		const { databasePath, storage, create, readonly, verbose } = this.config;
+
+		const flags = [
+			create === undefined || create === true ? 'c' : '',
+			readonly === true ? 'r' : 'w',
+			verbose === true ? 't' : '',
+		].join('');
 
 		try {
 			if (!this.sqlite3) {
@@ -40,13 +52,20 @@ export class SQLocalProcessor {
 				this.db = undefined;
 			}
 
-			if ('opfs' in this.sqlite3) {
-				this.db = new this.sqlite3.oo1.OpfsDb(this.config.databasePath, 'cw');
+			if ((!storage || storage === 'opfs') && databasePath) {
+				if ('opfs' in this.sqlite3) {
+					this.db = new this.sqlite3.oo1.OpfsDb(databasePath, flags);
+				} else {
+					this.db = new this.sqlite3.oo1.DB(databasePath, flags);
+					console.warn(
+						`The origin private file system is not available, so ${databasePath} will not be persisted. Make sure your web server is configured to use the correct HTTP response headers (See https://sqlocal.dallashoffman.com/guide/setup#cross-origin-isolation).`
+					);
+				}
+			} else if (storage === 'local' || storage === 'session') {
+				this.db = new this.sqlite3.oo1.JsStorageDb(storage);
 			} else {
-				this.db = new this.sqlite3.oo1.DB(this.config.databasePath, 'cw');
-				console.warn(
-					`The origin private file system is not available, so ${this.config.databasePath} will not be persisted. Make sure your web server is configured to use the correct HTTP response headers (See https://sqlocal.dallashoffman.com/guide/setup#cross-origin-isolation).`
-				);
+				this.db = new this.sqlite3.oo1.DB(databasePath, flags);
+				console.warn('Using in-memory database. Data will not be persisted.');
 			}
 		} catch (error) {
 			this.emitMessage({
@@ -76,7 +95,7 @@ export class SQLocalProcessor {
 
 		switch (message.type) {
 			case 'config':
-				this.editConfig(message.key, message.value);
+				this.editConfig(message);
 				break;
 			case 'query':
 			case 'transaction':
@@ -97,17 +116,9 @@ export class SQLocalProcessor {
 		}
 	};
 
-	protected editConfig = <T extends keyof ProcessorConfig>(
-		key: T,
-		value: ProcessorConfig[T]
-	) => {
-		if (this.config[key] === value) return;
-
-		this.config[key] = value;
-
-		if (key === 'databasePath') {
-			this.init();
-		}
+	protected editConfig = (message: ConfigMessage) => {
+		this.config = message.config;
+		this.init();
 	};
 
 	protected exec = (message: QueryMessage | TransactionMessage) => {

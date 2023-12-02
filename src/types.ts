@@ -3,10 +3,15 @@ import { Database, Sqlite3Static } from '@sqlite.org/sqlite-wasm';
 export type Sqlite3 = Sqlite3Static;
 export type Sqlite3Db = Database;
 export type Sqlite3Method = 'get' | 'all' | 'run' | 'values';
+export type StorageType = 'memory' | 'opfs' | 'local' | 'session';
 export type QueryKey = string;
 
 export type ProcessorConfig = {
 	databasePath?: string;
+	storage?: StorageType;
+	create?: boolean;
+	readonly?: boolean;
+	verbose?: boolean;
 };
 
 export type Message = InputMessage | OutputMessage;
@@ -40,8 +45,7 @@ export type FunctionMessage = {
 };
 export type ConfigMessage = {
 	type: 'config';
-	key: keyof ProcessorConfig;
-	value: any;
+	config: ProcessorConfig;
 };
 export type DestroyMessage = {
 	type: 'destroy';
