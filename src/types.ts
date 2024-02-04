@@ -14,7 +14,6 @@ export type OmitQueryKey<T> = T extends Message ? Omit<T, 'queryKey'> : never;
 
 export type InputMessage =
 	| QueryMessage
-	| TransactionMessage
 	| FunctionMessage
 	| ConfigMessage
 	| ImportMessage
@@ -25,14 +24,6 @@ export type QueryMessage = {
 	sql: string;
 	params: any[];
 	method: Sqlite3Method;
-};
-export type TransactionMessage = {
-	type: 'transaction';
-	queryKey: QueryKey;
-	statements: {
-		sql: string;
-		params: any[];
-	}[];
 };
 export type FunctionMessage = {
 	type: 'function';

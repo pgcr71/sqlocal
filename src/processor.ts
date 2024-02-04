@@ -4,7 +4,6 @@ import type {
 	QueryMessage,
 	Sqlite3,
 	Sqlite3Db,
-	TransactionMessage,
 	ProcessorConfig,
 	FunctionMessage,
 	UserFunction,
@@ -80,7 +79,6 @@ export class SQLocalProcessor {
 				this.editConfig(message.key, message.value);
 				break;
 			case 'query':
-			case 'transaction':
 				this.exec(message);
 				break;
 			case 'function':
@@ -114,7 +112,7 @@ export class SQLocalProcessor {
 		}
 	};
 
-	protected exec = (message: QueryMessage | TransactionMessage) => {
+	protected exec = (message: QueryMessage) => {
 		if (!this.db) return;
 
 		try {
@@ -125,38 +123,23 @@ export class SQLocalProcessor {
 				columns: [],
 			};
 
-			switch (message.type) {
-				case 'query':
-					const rows = this.db.exec({
-						sql: message.sql,
-						bind: message.params,
-						returnValue: 'resultRows',
-						rowMode: 'array',
-						columnNames: response.columns,
-					});
+			const rows = this.db.exec({
+				sql: message.sql,
+				bind: message.params,
+				returnValue: 'resultRows',
+				rowMode: 'array',
+				columnNames: response.columns,
+			});
 
-					switch (message.method) {
-						case 'run':
-							break;
-						case 'get':
-							response.rows = rows[0];
-							break;
-						case 'all':
-						default:
-							response.rows = rows;
-							break;
-					}
+			switch (message.method) {
+				case 'run':
 					break;
-
-				case 'transaction':
-					this.db.transaction((db: Sqlite3Db) => {
-						for (let statement of message.statements) {
-							db.exec({
-								sql: statement.sql,
-								bind: statement.params,
-							});
-						}
-					});
+				case 'get':
+					response.rows = rows[0];
+					break;
+				case 'all':
+				default:
+					response.rows = rows;
 					break;
 			}
 

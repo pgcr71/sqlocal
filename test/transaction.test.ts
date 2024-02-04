@@ -13,23 +13,28 @@ describe('transaction', () => {
 	});
 
 	it('should perform successful transaction', async () => {
-		await transaction((sql) => [
-			sql`INSERT INTO groceries (name) VALUES ('apples')`,
-			sql`INSERT INTO groceries (name) VALUES ('bananas')`,
-		]);
+		await transaction(async (sql) => {
+			await sql`INSERT INTO groceries (name) VALUES ('apples')`;
+			await sql`INSERT INTO groceries (name) VALUES ('bananas')`;
+		});
 
 		const data = await sql`SELECT * FROM groceries`;
 		expect(data.length).toBe(2);
 	});
 
 	it('should rollback failed transaction', async () => {
-		await transaction((sql) => [
-			sql`INSERT INTO groceries (name) VALUES ('carrots')`,
-			sql`INSERT INT groceries (name) VALUES ('lettuce')`,
-		]).catch(() => {});
+		let error: Error | undefined;
+
+		await transaction(async (sql) => {
+			await sql`INSERT INTO groceries (name) VALUES ('carrots')`;
+			await sql`INSERT INT groceries (name) VALUES ('lettuce')`;
+		}).catch((err) => {
+			error = err;
+		});
 
 		const data = await sql`SELECT * FROM groceries`;
 		expect(data.length).toBe(0);
+		expect(error).toBeInstanceOf(Error);
 	});
 
 	it('should perform successful manual transaction', async () => {
@@ -53,6 +58,7 @@ describe('transaction', () => {
 
 	it('should rollback failed manual transaction', async () => {
 		let rolledBack = false;
+		let error: Error | undefined;
 		await sql`BEGIN TRANSACTION`;
 
 		try {
@@ -61,6 +67,7 @@ describe('transaction', () => {
 		} catch (err) {
 			await sql`ROLLBACK`;
 			rolledBack = true;
+			error = err;
 		}
 
 		if (!rolledBack) await sql`END`;
@@ -68,5 +75,6 @@ describe('transaction', () => {
 		const data = await sql`SELECT * FROM groceries`;
 		expect(data.length).toBe(0);
 		expect(rolledBack).toBe(true);
+		expect(error).toBeInstanceOf(Error);
 	});
 });

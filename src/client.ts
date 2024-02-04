@@ -10,7 +10,6 @@ import type {
 	QueryKey,
 	QueryMessage,
 	Sqlite3Method,
-	TransactionMessage,
 } from './types';
 
 export class SQLocal {
@@ -73,11 +72,7 @@ export class SQLocal {
 
 	protected createQuery = (
 		message: OmitQueryKey<
-			| QueryMessage
-			| TransactionMessage
-			| DestroyMessage
-			| FunctionMessage
-			| ImportMessage
+			QueryMessage | DestroyMessage | FunctionMessage | ImportMessage
 		>
 	) => {
 		if (this.isWorkerDestroyed === true) {
@@ -102,7 +97,7 @@ export class SQLocal {
 				this.worker.postMessage({
 					...message,
 					queryKey,
-				} satisfies QueryMessage | TransactionMessage | DestroyMessage | FunctionMessage);
+				} satisfies QueryMessage | DestroyMessage | FunctionMessage);
 				break;
 		}
 
@@ -169,16 +164,16 @@ export class SQLocal {
 		return this.convertRowsToObjects(rows, columns) as T;
 	};
 
-	transaction = async (
-		passStatements: (
-			sql: SQLocal['convertSqlTemplate']
-		) => ReturnType<SQLocal['convertSqlTemplate']>[]
-	) => {
-		const statements = passStatements(this.convertSqlTemplate);
-		await this.createQuery({
-			type: 'transaction',
-			statements,
-		});
+	transaction = async (execSql: (sql: typeof this.sql) => Promise<void>) => {
+		await this.sql`BEGIN TRANSACTION`;
+
+		try {
+			await execSql(this.sql);
+			await this.sql`END`;
+		} catch (err) {
+			await this.sql`ROLLBACK`;
+			throw err;
+		}
 	};
 
 	createCallbackFunction = async (
